@@ -1,7 +1,8 @@
 // src/pages/PolicyDetailsPage.jsx
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { usePolicy } from '../context/PolicyContext';
+import { policyService } from '../services/policyService';
 import { PolicyViewer } from '../components/policies/PolicyViewer';
 import { PolicyOverviewTab } from '../components/policies/PolicyOverviewTab';
 import { PolicyCoverageTab } from '../components/policies/PolicyCoverageTab';
@@ -16,6 +17,7 @@ import {
   Shield,
   FileText,
   AlertTriangle,
+  Loader2,
 } from 'lucide-react';
 
 export const PolicyDetailsPage = () => {
@@ -23,14 +25,42 @@ export const PolicyDetailsPage = () => {
   const navigate = useNavigate();
   const { policies } = usePolicy();
 
-  // Find policy or fallback
-  const policy = policies.find((p) => p.id === policyId) || policies[0];
+  // Find policy from local list as immediate default
+  const basePolicy = policies.find((p) => p.id === policyId) || policies[0];
+  const [currentPolicy, setCurrentPolicy] = useState(basePolicy);
+  const [isLoadingAnalysis, setIsLoadingAnalysis] = useState(false);
 
   const [activeTab, setActiveTab] = useState('overview'); // 'overview' | 'coverage' | 'exclusions' | 'limits' | 'clauses'
   const [currentPage, setCurrentPage] = useState(1);
   const [highlightedClauseId, setHighlightedClauseId] = useState(null);
 
-  if (!policy) {
+  // Fetch complete structured analysis from backend API when viewing policy
+  useEffect(() => {
+    const targetId = policyId || basePolicy?.id;
+    if (!targetId) return;
+
+    let isMounted = true;
+    setIsLoadingAnalysis(true);
+
+    policyService.getPolicyAnalysis(targetId)
+      .then((fullData) => {
+        if (isMounted && fullData) {
+          setCurrentPolicy(fullData);
+        }
+      })
+      .catch((err) => {
+        console.warn('Could not load policy analysis details:', err);
+      })
+      .finally(() => {
+        if (isMounted) setIsLoadingAnalysis(false);
+      });
+
+    return () => { isMounted = false; };
+  }, [policyId, basePolicy?.id]);
+
+  const activePolicy = currentPolicy || basePolicy;
+
+  if (!activePolicy) {
     return (
       <div className="p-8 text-center">
         <p className="text-charcoal-400">Policy not found.</p>
@@ -46,6 +76,13 @@ export const PolicyDetailsPage = () => {
     if (pageNumber) {
       setCurrentPage(pageNumber);
     }
+  };
+
+  const handleTermUpdated = (updatedLimits) => {
+    setCurrentPolicy((prev) => ({
+      ...prev,
+      limitsAndConditions: updatedLimits,
+    }));
   };
 
   const tabs = [
@@ -71,13 +108,19 @@ export const PolicyDetailsPage = () => {
           <div>
             <div className="flex items-center gap-2">
               <span className="text-[11px] font-bold uppercase tracking-wider text-forest-700">
-                {policy.provider}
+                {activePolicy.provider}
               </span>
               <span className="text-charcoal-300">·</span>
-              <span className="text-xs text-charcoal-400 font-mono">{policy.policyNumber}</span>
+              <span className="text-xs text-charcoal-400 font-mono">{activePolicy.policyNumber}</span>
+              {isLoadingAnalysis && (
+                <span className="inline-flex items-center gap-1 text-[10px] text-forest-700 bg-forest-50 px-2 py-0.5 rounded-full font-medium">
+                  <Loader2 className="w-2.5 h-2.5 animate-spin" />
+                  Syncing OCR analysis...
+                </span>
+              )}
             </div>
             <h2 className="text-xl sm:text-2xl font-bold text-forest-900 font-heading">
-              {policy.name}
+              {activePolicy.name}
             </h2>
           </div>
         </div>
@@ -87,7 +130,7 @@ export const PolicyDetailsPage = () => {
             variant="secondary"
             size="sm"
             leftIcon={Bot}
-            onClick={() => navigate(`/app/assistant?policyId=${policy.id}`)}
+            onClick={() => navigate(`/app/assistant?policyId=${activePolicy.id}`)}
           >
             Ask AI Assistant
           </Button>
@@ -107,7 +150,7 @@ export const PolicyDetailsPage = () => {
         {/* Left Panel: Policy Document Viewer */}
         <div className="lg:col-span-6 h-[600px] lg:h-[720px]">
           <PolicyViewer
-            policy={policy}
+            policy={activePolicy}
             currentPage={currentPage}
             setCurrentPage={setCurrentPage}
             highlightedClauseId={highlightedClauseId}
@@ -136,13 +179,18 @@ export const PolicyDetailsPage = () => {
 
           {/* Tab Content Panels (Scrollable) */}
           <div className="flex-1 overflow-y-auto pt-4 pr-1">
-            {activeTab === 'overview' && <PolicyOverviewTab policy={policy} />}
-            {activeTab === 'coverage' && <PolicyCoverageTab policy={policy} />}
-            {activeTab === 'exclusions' && <PolicyExclusionsTab policy={policy} />}
-            {activeTab === 'limits' && <PolicyLimitsTab policy={policy} />}
+            {activeTab === 'overview' && <PolicyOverviewTab policy={activePolicy} />}
+            {activeTab === 'coverage' && <PolicyCoverageTab policy={activePolicy} />}
+            {activeTab === 'exclusions' && <PolicyExclusionsTab policy={activePolicy} />}
+            {activeTab === 'limits' && (
+              <PolicyLimitsTab
+                policy={activePolicy}
+                onTermUpdated={handleTermUpdated}
+              />
+            )}
             {activeTab === 'clauses' && (
               <PolicyClausesTab
-                policy={policy}
+                policy={activePolicy}
                 onSelectClause={handleSelectClause}
                 activeClauseId={highlightedClauseId}
               />

@@ -137,10 +137,10 @@ export const PolicyUploadModal = ({ isOpen, onClose }) => {
           </div>
           <div>
             <h4 className="text-lg font-bold text-forest-900 font-heading">
-              Policy Successfully Ingested (Demo Simulation)
+              Policy Successfully Processed
             </h4>
             <p className="text-xs text-charcoal-500 max-w-md mx-auto mt-1">
-              Your document <strong className="text-charcoal-800">{selectedFile?.name}</strong> has been parsed into the local demo workspace with mock extracted clauses.
+              Your document <strong className="text-charcoal-800">{selectedFile?.name}</strong> has been ingested through the Document Intelligence pipeline with structured terms and clauses extracted.
             </p>
           </div>
 
@@ -151,15 +151,15 @@ export const PolicyUploadModal = ({ isOpen, onClose }) => {
             </div>
             <div className="flex justify-between">
               <span className="text-charcoal-400">Sum Insured:</span>
-              <span className="font-bold text-forest-900">₹{newPolicyResult.sumInsured.toLocaleString('en-IN')}</span>
+              <span className="font-bold text-forest-900">₹{Number(newPolicyResult.sumInsured || 0).toLocaleString('en-IN')}</span>
             </div>
             <div className="flex justify-between">
               <span className="text-charcoal-400">Room Rent Limit:</span>
-              <span className="font-bold text-forest-900">₹{newPolicyResult.roomRentLimitPerDay}/day</span>
+              <span className="font-bold text-forest-900">₹{newPolicyResult.roomRentLimitPerDay || 5000}/day</span>
             </div>
             <div className="flex justify-between">
               <span className="text-charcoal-400">Deductible:</span>
-              <span className="font-bold text-forest-900">₹{newPolicyResult.deductible.toLocaleString('en-IN')}</span>
+              <span className="font-bold text-forest-900">₹{Number(newPolicyResult.deductible || 0).toLocaleString('en-IN')}</span>
             </div>
           </div>
 
@@ -176,7 +176,7 @@ export const PolicyUploadModal = ({ isOpen, onClose }) => {
           <div className="p-3 bg-warmWhite rounded-xl border border-borderGray flex items-start gap-2.5 text-xs text-charcoal-600">
             <Sparkles className="w-4 h-4 text-forest-600 shrink-0 mt-0.5" />
             <span>
-              <strong>Frontend Prototype Demo:</strong> This form simulates OCR parsing and clause analysis. In production, this connects to FastAPI and doc-intelligence OCR models.
+              <strong>Document Intelligence Pipeline:</strong> Upload digital or scanned PDF policy schedules. The backend runs optical extraction, section classification, and confidence-scored term extraction.
             </span>
           </div>
 

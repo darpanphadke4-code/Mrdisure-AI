@@ -172,8 +172,14 @@ export const PolicyViewer = ({
           {/* Page Sections */}
           <div className="space-y-6">
             {sectionsToDisplay.map((sec) => {
+              const cleanHighlight = String(highlightedClauseId || '').toLowerCase().replace('clause-', '').replace(/[-_]/g, ' ');
               const isClauseHighlighted =
-                highlightedClauseId && sec.clauses?.includes(highlightedClauseId);
+                highlightedClauseId && (
+                  sec.clauses?.includes(highlightedClauseId) ||
+                  sec.id === highlightedClauseId ||
+                  (sec.clauses && sec.clauses.some((c) => String(c).toLowerCase().includes(cleanHighlight) || cleanHighlight.includes(String(c).toLowerCase()))) ||
+                  (sec.title && cleanHighlight.length > 2 && sec.title.toLowerCase().includes(cleanHighlight))
+                );
 
               // Check search match
               const matchesSearch =

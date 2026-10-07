@@ -1,5 +1,6 @@
 // src/context/PolicyContext.jsx
 import React, { createContext, useContext, useState, useEffect } from 'react';
+import { initialPolicies } from '../data/mockPolicies';
 import { policyService } from '../services/policyService';
 import { reportService } from '../services/reportService';
 import { authService } from '../services/authService';
@@ -43,11 +44,27 @@ const DEFAULT_ACTIVITIES = [
 ];
 
 export const PolicyProvider = ({ children }) => {
-  const [policies, setPolicies] = useState(() => policyService.getPolicies());
-  const [selectedPolicyId, setSelectedPolicyId] = useState(() => {
-    const list = policyService.getPolicies();
-    return list[0]?.id || "pol-care-supreme-01";
+  const [policies, setPolicies] = useState(() => {
+    try {
+      const stored = localStorage.getItem('medisure_policies');
+      if (stored) return JSON.parse(stored);
+    } catch (e) {
+      console.warn('Failed reading localStorage', e);
+    }
+    return initialPolicies;
   });
+
+  const [selectedPolicyId, setSelectedPolicyId] = useState(() => {
+    try {
+      const stored = localStorage.getItem('medisure_policies');
+      if (stored) {
+        const list = JSON.parse(stored);
+        if (list && list.length > 0) return list[0].id;
+      }
+    } catch (e) {}
+    return "pol-care-supreme-01";
+  });
+
   const [reports, setReports] = useState(() => reportService.getReports());
   const [user, setUser] = useState(() => authService.getUser());
   const [activities, setActivities] = useState(() => {
@@ -58,6 +75,19 @@ export const PolicyProvider = ({ children }) => {
       return DEFAULT_ACTIVITIES;
     }
   });
+
+  // Re-fetch policies from backend API on mount
+  useEffect(() => {
+    let isMounted = true;
+    policyService.getPolicies().then((fetched) => {
+      if (isMounted && Array.isArray(fetched) && fetched.length > 0) {
+        setPolicies(fetched);
+      }
+    }).catch((e) => {
+      console.warn('Error fetching policies on mount:', e);
+    });
+    return () => { isMounted = false; };
+  }, []);
 
   const selectedPolicy = policies.find((p) => p.id === selectedPolicyId) || policies[0] || null;
 
@@ -78,21 +108,21 @@ export const PolicyProvider = ({ children }) => {
 
   const handleUploadPolicy = async (file, metadata, onProgress) => {
     const newPolicy = await policyService.uploadPolicy(file, metadata, onProgress);
-    const updatedList = policyService.getPolicies();
+    const updatedList = await policyService.getPolicies();
     setPolicies(updatedList);
     setSelectedPolicyId(newPolicy.id);
     addActivity({
       type: "upload",
       title: "New Policy Uploaded",
-      description: `Uploaded "${newPolicy.name}" (${newPolicy.fileSize})`,
+      description: `Uploaded "${newPolicy.name}" (${newPolicy.fileSize || 'PDF'})`,
       policyName: newPolicy.name,
     });
     return newPolicy;
   };
 
-  const handleDeletePolicy = (id) => {
+  const handleDeletePolicy = async (id) => {
     const polToDelete = policies.find((p) => p.id === id);
-    const updated = policyService.deletePolicy(id);
+    const updated = await policyService.deletePolicy(id);
     setPolicies(updated);
     if (selectedPolicyId === id) {
       setSelectedPolicyId(updated[0]?.id || null);
