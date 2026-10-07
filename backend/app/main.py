@@ -10,6 +10,7 @@ from fastapi.exceptions import RequestValidationError
 from app.config import settings
 from app.database import init_db
 from app.routes.policies import router as policies_router
+from app.routes.chat import router as chat_router
 from app.services.ocr_service import ocr_service
 
 # Configure structured logging
@@ -47,6 +48,7 @@ app.add_middleware(
 
 # Mount Routes
 app.include_router(policies_router)
+app.include_router(chat_router)
 
 # Health Check Endpoint
 @app.get("/api/health", tags=["health"])

@@ -15,7 +15,7 @@ import {
 import { Button } from '../common/Button';
 import { Badge } from '../common/Badge';
 
-export const ChatMessage = ({ message, onTransferEstimate }) => {
+export const ChatMessage = ({ message, onTransferEstimate, currentPolicyId }) => {
   const isUser = message.sender === 'user';
   const [showExplanation, setShowExplanation] = useState(true);
   const navigate = useNavigate();
@@ -67,7 +67,52 @@ export const ChatMessage = ({ message, onTransferEstimate }) => {
                 </div>
               )}
 
-              {/* Cited Clauses Box */}
+              {/* Grounded RAG Citations (Step 3) */}
+              {message.citations && message.citations.length > 0 && (
+                <div className="space-y-2 pt-2 border-t border-borderGray/70">
+                  <span className="text-[11px] font-bold uppercase tracking-wider text-charcoal-400 block">
+                    Sources & Document Citations
+                  </span>
+                  <div className="space-y-1.5">
+                    {message.citations.map((cite, idx) => {
+                      const targetPolicyId = message.policyId || currentPolicyId;
+                      return (
+                        <div
+                          key={idx}
+                          className="p-2.5 bg-forest-50/60 rounded-xl border border-forest-100 flex items-center justify-between gap-3 text-xs"
+                        >
+                          <div className="flex items-center gap-2 min-w-0">
+                            <span className="text-sm">📄</span>
+                            <div className="min-w-0">
+                              <span className="font-bold text-forest-900 block truncate">
+                                Page {cite.page} · {cite.section}
+                              </span>
+                              {cite.similarity && (
+                                <span className="text-[10px] text-charcoal-400">
+                                  Relevance: {(cite.similarity * 100).toFixed(0)}%
+                                </span>
+                              )}
+                            </div>
+                          </div>
+                          {targetPolicyId && (
+                            <button
+                              onClick={() => {
+                                navigate(`/app/policies/${targetPolicyId}?page=${cite.page}&clause=${cite.clause_id || ''}`);
+                              }}
+                              className="inline-flex items-center gap-1 px-2.5 py-1 bg-white border border-forest-200 rounded-lg text-forest-800 font-semibold text-[11px] hover:bg-forest-100 hover:text-forest-900 transition-colors shadow-xs shrink-0"
+                            >
+                              <span>View Source</span>
+                              <ArrowRight className="w-3 h-3" />
+                            </button>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+
+              {/* Cited Clauses Box (Legacy / Fallback) */}
               {message.clauses && message.clauses.length > 0 && (
                 <div className="space-y-1.5">
                   <span className="text-[11px] font-bold uppercase tracking-wider text-charcoal-400 block">

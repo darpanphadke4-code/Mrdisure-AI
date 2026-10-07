@@ -21,6 +21,14 @@ class Settings(BaseSettings):
     SECRET_KEY: str = "dev_secret_key_medisure_ai"
     ALLOWED_ORIGINS: str = "http://localhost:5173,http://127.0.0.1:5173"
 
+    # Step 3: Local RAG & Ollama Configuration
+    OLLAMA_BASE_URL: str = Field(default="http://127.0.0.1:11434", description="Base URL for local Ollama server")
+    OLLAMA_LLM_MODEL: str = Field(default="qwen3:4b", description="LLM model for Q&A")
+    OLLAMA_EMBEDDING_MODEL: str = Field(default="nomic-embed-text", description="Embedding model for chunks")
+    CHROMA_PERSIST_DIRECTORY: str = Field(default="./data/chroma", description="ChromaDB persistent directory")
+    RAG_TOP_K: int = Field(default=5, description="Number of top chunks to retrieve")
+    RAG_MIN_RELEVANCE: float = Field(default=0.30, description="Minimum similarity/relevance threshold")
+
     @property
     def cors_origins(self) -> List[str]:
         return [origin.strip() for origin in self.ALLOWED_ORIGINS.split(",") if origin.strip()]

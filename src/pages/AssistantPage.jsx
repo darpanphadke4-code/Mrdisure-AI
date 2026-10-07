@@ -18,6 +18,8 @@ import {
   PanelRightOpen,
   History,
   Shield,
+  AlertCircle,
+  CheckCircle2,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 
@@ -31,7 +33,7 @@ export const AssistantPage = () => {
   // Pick policy from query param or context
   const activePolicy = queryPolicyId
     ? policies.find((p) => p.id === queryPolicyId) || selectedPolicy
-    : selectedPolicy;
+    : selectedPolicy || policies[0];
 
   const [sessions, setSessions] = useState(() => chatService.getSessions());
   const [activeSessionId, setActiveSessionId] = useState(() => {
@@ -41,6 +43,7 @@ export const AssistantPage = () => {
   const [isTyping, setIsTyping] = useState(false);
   const [showRightContext, setShowRightContext] = useState(true);
   const [showMobileHistory, setShowMobileHistory] = useState(false);
+  const [aiHealth, setAiHealth] = useState({ ollama_available: true, llm_model: 'qwen3:4b' });
 
   const messagesEndRef = useRef(null);
 
@@ -54,9 +57,21 @@ export const AssistantPage = () => {
     scrollToBottom();
   }, [currentSession?.messages, isTyping]);
 
+  // Check Ollama AI health on mount
+  useEffect(() => {
+    chatService.checkAIHealth().then((health) => {
+      setAiHealth(health);
+    });
+  }, []);
+
   // Handle sending a message
   const handleSendMessage = async (text) => {
     if (!text.trim() || isTyping) return;
+
+    if (!activePolicy) {
+      toast.error('Please upload or select a policy before asking questions');
+      return;
+    }
 
     setIsTyping(true);
 
@@ -71,7 +86,8 @@ export const AssistantPage = () => {
         policyName: activePolicy?.name,
       });
     } catch (e) {
-      toast.error('Failed to get assistant response');
+      const errText = e.message || 'Failed to get assistant response';
+      toast.error(errText);
     } finally {
       setIsTyping(false);
     }
@@ -98,6 +114,26 @@ export const AssistantPage = () => {
     toast.success('Transferring policy deduction limits to Cost Estimator...');
     navigate('/app/calculator', { state: { fromChat: payload } });
   };
+
+  // Empty State if no policies uploaded
+  if (!policies || policies.length === 0) {
+    return (
+      <div className="flex flex-col items-center justify-center p-12 text-center h-[calc(100vh-8rem)] bg-white rounded-2xl border border-borderGray shadow-subtle">
+        <div className="w-16 h-16 rounded-2xl bg-forest-50 text-forest-700 flex items-center justify-center mb-4 border border-forest-100 shadow-subtle">
+          <Shield className="w-8 h-8" />
+        </div>
+        <h3 className="text-lg font-bold text-forest-900 font-heading mb-1">
+          No Policies Available
+        </h3>
+        <p className="text-xs text-charcoal-500 max-w-sm mb-6">
+          Upload a policy to start asking questions.
+        </p>
+        <Button variant="primary" onClick={() => navigate('/app/policies')}>
+          Upload Policy
+        </Button>
+      </div>
+    );
+  }
 
   return (
     <div className="bg-white rounded-2xl border border-borderGray shadow-subtle flex h-[calc(100vh-8rem)] overflow-hidden">
@@ -144,10 +180,10 @@ export const AssistantPage = () => {
       <div className="flex-1 flex flex-col min-w-0 bg-warmWhite/30 h-full">
         {/* Chat Header Bar */}
         <div className="h-14 px-4 sm:px-6 border-b border-borderGray bg-white flex items-center justify-between shrink-0">
-          <div className="flex items-center gap-2.5">
+          <div className="flex items-center gap-2.5 min-w-0">
             <button
               onClick={() => setShowMobileHistory(true)}
-              className="p-1.5 rounded-lg text-charcoal-500 hover:text-forest-900 md:hidden"
+              className="p-1.5 rounded-lg text-charcoal-500 hover:text-forest-900 md:hidden shrink-0"
               title="View Inquiry History"
             >
               <History className="w-5 h-5" />
@@ -155,17 +191,43 @@ export const AssistantPage = () => {
             <div className="w-7 h-7 rounded-lg bg-forest-100 text-forest-800 flex items-center justify-center shrink-0">
               <Bot className="w-4 h-4" />
             </div>
-            <div>
-              <h3 className="text-xs sm:text-sm font-bold text-forest-900 font-heading truncate max-w-[200px] sm:max-w-xs">
-                {currentSession?.title || 'Policy Analysis Assistant'}
-              </h3>
-              <p className="text-[10px] text-charcoal-400">
-                Verified against: <strong>{activePolicy?.name}</strong>
-              </p>
+            <div className="min-w-0">
+              <div className="flex items-center gap-1.5 flex-wrap">
+                <span className="text-[11px] text-charcoal-500 font-medium">
+                  Answering questions about:
+                </span>
+                <select
+                  value={activePolicy?.id || ''}
+                  onChange={(e) => {
+                    const chosenId = e.target.value;
+                    setSelectedPolicyId(chosenId);
+                    navigate(`/app/assistant?policyId=${chosenId}`);
+                  }}
+                  className="text-xs font-bold text-forest-900 bg-forest-50 border border-forest-200 rounded-lg px-2 py-0.5 focus:outline-none cursor-pointer max-w-[200px] truncate"
+                >
+                  {policies.map((p) => (
+                    <option key={p.id} value={p.id}>
+                      {p.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
             </div>
           </div>
 
           <div className="flex items-center gap-2">
+            {aiHealth.ollama_available ? (
+              <span className="hidden sm:inline-flex items-center gap-1 text-[10px] text-emerald-800 bg-emerald-50 px-2 py-0.5 rounded-full font-medium border border-emerald-200">
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-600" />
+                Local Qwen3 Ready
+              </span>
+            ) : (
+              <span className="hidden sm:inline-flex items-center gap-1 text-[10px] text-amber-800 bg-amber-50 px-2 py-0.5 rounded-full font-medium border border-amber-200">
+                <AlertCircle className="w-3 h-3 text-amber-600" />
+                Ollama Offline
+              </span>
+            )}
+
             <button
               onClick={() => handleClearSession(activeSessionId)}
               className="p-1.5 rounded-lg text-charcoal-400 hover:text-rose-600 hover:bg-rose-50 transition-colors"
@@ -187,14 +249,25 @@ export const AssistantPage = () => {
           </div>
         </div>
 
+        {/* Ollama Offline Warning Banner */}
+        {!aiHealth.ollama_available && (
+          <div className="p-2.5 bg-amber-50 border-b border-amber-200 text-xs text-amber-900 flex items-center justify-between px-4 shrink-0">
+            <span className="flex items-center gap-2">
+              <AlertCircle className="w-4 h-4 text-amber-700 shrink-0" />
+              <span>Local AI service is not running. Start Ollama and try again.</span>
+            </span>
+            <span className="text-[11px] font-mono text-amber-800">ollama serve</span>
+          </div>
+        )}
+
         {/* Messages Stream */}
         <div className="flex-1 overflow-y-auto p-4 sm:p-6 space-y-2">
           {/* Welcome disclaimer bubble */}
           <div className="mx-auto max-w-lg p-3 bg-forest-50/70 border border-forest-100 rounded-xl text-center text-xs text-charcoal-600 mb-4">
             <span className="font-bold text-forest-900 block font-heading mb-0.5">
-              MediSure Policy Intelligence Prototype
+              Local Policy Intelligence (Qwen3 & RAG)
             </span>
-            <span>Ask questions regarding waiting periods, room rent sub-limits, surgery coverage, or non-medical consumables.</span>
+            <span>Ask questions regarding waiting periods, room rent sub-limits, surgery coverage, or exclusions. Answers are strictly grounded in policy text with source page citations.</span>
           </div>
 
           {currentSession?.messages?.map((msg) => (
@@ -202,6 +275,7 @@ export const AssistantPage = () => {
               key={msg.id}
               message={msg}
               onTransferEstimate={handleTransferEstimate}
+              currentPolicyId={activePolicy?.id}
             />
           ))}
 
@@ -216,7 +290,7 @@ export const AssistantPage = () => {
                 <span className="w-2 h-2 rounded-full bg-forest-600 animate-bounce [animation-delay:0.2s]" />
                 <span className="w-2 h-2 rounded-full bg-forest-600 animate-bounce [animation-delay:0.4s]" />
                 <span className="ml-2 font-medium text-forest-800">
-                  Scanning policy clauses & schedule...
+                  Retrieving relevant policy clauses & analyzing evidence with Qwen3...
                 </span>
               </div>
             </div>
@@ -240,11 +314,14 @@ export const AssistantPage = () => {
       </div>
 
       {/* Right Policy Context Panel on Large Screens */}
-      {showRightContext && (
+      {showRightContext && activePolicy && (
         <div className="hidden lg:block">
           <PolicyContextPanel
             policy={activePolicy}
-            onSelectPolicy={(id) => setSelectedPolicyId(id)}
+            onSelectPolicy={(id) => {
+              setSelectedPolicyId(id);
+              navigate(`/app/assistant?policyId=${id}`);
+            }}
           />
         </div>
       )}

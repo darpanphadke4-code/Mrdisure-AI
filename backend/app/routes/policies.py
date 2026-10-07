@@ -3,7 +3,7 @@ import os
 import logging
 from datetime import datetime, timezone
 from typing import List, Optional
-from fastapi import APIRouter, Depends, UploadFile, File, Form, HTTPException, status
+from fastapi import APIRouter, Depends, UploadFile, File, Form, HTTPException, status, BackgroundTasks
 from sqlalchemy.orm import Session
 
 from app.database import get_db
@@ -34,6 +34,9 @@ from app.services.pdf_service import pdf_service
 from app.services.text_cleaner import text_cleaner
 from app.services.section_parser import section_parser
 from app.services.policy_extractor import policy_extractor
+from app.services.indexing_service import indexing_service
+from app.services.vector_store import vector_store_service
+from app.services.embedding_service import OllamaServiceError
 
 logger = logging.getLogger("medisure.routes.policies")
 
@@ -54,8 +57,22 @@ def get_current_user(db: Session = Depends(get_db)) -> User:
         db.refresh(user)
     return user
 
+def background_index_policy(policy_id: str):
+    """
+    Background worker to index policy chunks into ChromaDB without blocking upload.
+    """
+    from app.database import SessionLocal
+    bg_db = SessionLocal()
+    try:
+        indexing_service.index_policy(policy_id, bg_db)
+    except Exception as e:
+        logger.warning(f"Background indexing for policy {policy_id} deferred: {e}")
+    finally:
+        bg_db.close()
+
 @router.post("/upload", response_model=StandardResponse, status_code=status.HTTP_201_CREATED)
 def upload_policy(
+    background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
     custom_name: Optional[str] = Form(None),
     db: Session = Depends(get_db),
@@ -174,6 +191,9 @@ def upload_policy(
 
         db.commit()
         db.refresh(policy)
+
+        # Schedule asynchronous semantic chunk & vector indexing
+        background_tasks.add_task(background_index_policy, policy.id)
 
         summary_data = PolicySummary.model_validate(policy)
         return StandardResponse(
@@ -530,6 +550,12 @@ def delete_policy(
         except Exception as e:
             logger.warning(f"Failed deleting physical file {policy.file_path}: {e}")
 
+    # Remove stored vectors from ChromaDB
+    try:
+        vector_store_service.delete_policy_vectors(policy_id)
+    except Exception as e:
+        logger.warning(f"Failed deleting vectors for policy {policy_id}: {e}")
+
     db.delete(policy)
     db.commit()
 
@@ -537,4 +563,57 @@ def delete_policy(
         success=True,
         data={"deleted_policy_id": policy_id},
         message="Policy and extracted data deleted successfully"
+    )
+
+@router.post("/{policy_id}/index", response_model=StandardResponse)
+def index_policy(
+    policy_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Idempotently index policy clauses into semantic chunks and ChromaDB vector store.
+    """
+    policy = db.query(Policy).filter(Policy.id == policy_id, Policy.user_id == current_user.id).first()
+    if not policy:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Policy not found")
+
+    try:
+        result = indexing_service.index_policy(policy_id, db)
+        return StandardResponse(
+            success=True,
+            data=result,
+            message=result.get("message", "Policy indexed successfully")
+        )
+    except OllamaServiceError as err:
+        logger.warning(f"Ollama unavailable during indexing: {err}")
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=str(err)
+        )
+    except Exception as err:
+        logger.error(f"Indexing error: {err}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to index policy: {str(err)}"
+        )
+
+@router.get("/{policy_id}/index-status", response_model=StandardResponse)
+def get_policy_index_status(
+    policy_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Get current semantic chunk and vector indexing status for a policy.
+    """
+    policy = db.query(Policy).filter(Policy.id == policy_id, Policy.user_id == current_user.id).first()
+    if not policy:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Policy not found")
+
+    result = indexing_service.get_index_status(policy_id, db)
+    return StandardResponse(
+        success=True,
+        data=result,
+        message="Index status retrieved"
     )

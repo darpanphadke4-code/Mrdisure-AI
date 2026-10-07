@@ -310,6 +310,40 @@ export const policyService = {
   },
 
   /**
+   * Index policy clauses into semantic chunks and ChromaDB vector store
+   */
+  indexPolicy: async (policyId) => {
+    try {
+      const res = await fetch(`${API_BASE}/policies/${policyId}/index`, {
+        method: 'POST',
+      });
+      if (res.ok) {
+        const json = await res.json();
+        return json.data;
+      }
+    } catch (e) {
+      console.warn('API index policy error:', e);
+    }
+    return { policy_id: policyId, status: 'NOT_INDEXED', chunk_count: 0, indexed: false };
+  },
+
+  /**
+   * Get semantic chunk and vector indexing status for a policy
+   */
+  getIndexStatus: async (policyId) => {
+    try {
+      const res = await fetch(`${API_BASE}/policies/${policyId}/index-status`);
+      if (res.ok) {
+        const json = await res.json();
+        return json.data;
+      }
+    } catch (e) {
+      console.warn('API get index status error:', e);
+    }
+    return { policy_id: policyId, status: 'NOT_INDEXED', chunk_count: 0, indexed: false };
+  },
+
+  /**
    * Reset demo policies back to defaults
    */
   resetPolicies: () => {

@@ -55,12 +55,32 @@ export const chatService = {
   },
 
   /**
-   * Send user message and simulate realistic AI assistant response
+   * Check local AI / Ollama service health
+   */
+  checkAIHealth: async () => {
+    try {
+      const res = await fetch('/api/ai/health');
+      if (res.ok) {
+        const json = await res.json();
+        return json.data;
+      }
+    } catch (e) {
+      console.warn('AI health check failed:', e);
+    }
+    return { ollama_available: false, llm_model: 'qwen3:4b', embedding_model: 'nomic-embed-text' };
+  },
+
+  /**
+   * Send user message to local RAG backend or fallback to demo simulation
    */
   sendMessage: async (sessionId, userText, policy) => {
     const sessions = chatService.getSessions();
-    const sessionIndex = sessions.findIndex((s) => s.id === sessionId);
-    if (sessionIndex === -1) return null;
+    let sessionIndex = sessions.findIndex((s) => s.id === sessionId);
+    if (sessionIndex === -1) {
+      const created = chatService.createSession("Policy Inquiry", policy?.id);
+      sessions.unshift(created);
+      sessionIndex = 0;
+    }
 
     const userMsg = {
       id: `msg-${Date.now()}-u`,
@@ -71,7 +91,70 @@ export const chatService = {
 
     sessions[sessionIndex].messages.push(userMsg);
 
-    // Simulate thinking delay (700ms - 1200ms)
+    // If a policy is selected, attempt real Local RAG via FastAPI backend
+    if (policy?.id) {
+      try {
+        const payload = {
+          policy_id: policy.id,
+          question: userText,
+        };
+        if (sessions[sessionIndex].backendSessionId) {
+          payload.session_id = sessions[sessionIndex].backendSessionId;
+        }
+
+        const res = await fetch('/api/chat', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        });
+
+        if (res.ok) {
+          const json = await res.json();
+          if (json.success && json.data) {
+            const data = json.data;
+            if (data.session_id) {
+              sessions[sessionIndex].backendSessionId = data.session_id;
+            }
+
+            const assistantMsg = {
+              id: `msg-${Date.now()}-a`,
+              sender: "assistant",
+              text: data.answer,
+              timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+              citations: data.citations || [],
+              context_found: data.context_found,
+              policyId: policy.id,
+              confidence: data.context_found ? "Verified Grounded" : "No Direct Policy Evidence",
+            };
+
+            sessions[sessionIndex].messages.push(assistantMsg);
+            if (sessions[sessionIndex].messages.length <= 3) {
+              sessions[sessionIndex].title = userText.slice(0, 32) + (userText.length > 32 ? '...' : '');
+            }
+            localStorage.setItem(SESSIONS_KEY, JSON.stringify(sessions));
+            return {
+              userMsg,
+              assistantMsg,
+              updatedSession: sessions[sessionIndex]
+            };
+          }
+        } else {
+          const errData = await res.json().catch(() => ({}));
+          const errMsg = errData.detail || `Chat request failed (HTTP ${res.status})`;
+          if (res.status === 503 || errMsg.includes("Ollama") || errMsg.includes("Local AI service")) {
+            throw new Error("Local AI service is not running. Start Ollama and try again.");
+          }
+          throw new Error(errMsg);
+        }
+      } catch (apiErr) {
+        if (apiErr.message && (apiErr.message.includes("Ollama") || apiErr.message.includes("Local AI service"))) {
+          throw apiErr;
+        }
+        console.warn('Real RAG API failed or policy is purely local demo, using simulated fallback:', apiErr);
+      }
+    }
+
+    // Fallback simulation for mock demo policies
     await new Promise((resolve) => setTimeout(resolve, 800));
 
     // Match query keywords

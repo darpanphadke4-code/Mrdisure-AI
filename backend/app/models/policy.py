@@ -35,3 +35,5 @@ class Policy(Base):
     user = relationship("User", back_populates="policies")
     clauses = relationship("PolicyClause", back_populates="policy", cascade="all, delete-orphan", order_by="PolicyClause.page_number")
     terms = relationship("PolicyTerm", back_populates="policy", cascade="all, delete-orphan")
+    chunks = relationship("PolicyChunk", back_populates="policy", cascade="all, delete-orphan", order_by="PolicyChunk.chunk_index")
+    chat_sessions = relationship("ChatSession", back_populates="policy", cascade="all, delete-orphan")

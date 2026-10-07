@@ -1,6 +1,5 @@
-// src/pages/PolicyDetailsPage.jsx
 import React, { useState, useEffect } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
 import { usePolicy } from '../context/PolicyContext';
 import { policyService } from '../services/policyService';
 import { PolicyViewer } from '../components/policies/PolicyViewer';
@@ -22,6 +21,7 @@ import {
 
 export const PolicyDetailsPage = () => {
   const { policyId } = useParams();
+  const [searchParams] = useSearchParams();
   const navigate = useNavigate();
   const { policies } = usePolicy();
 
@@ -31,8 +31,24 @@ export const PolicyDetailsPage = () => {
   const [isLoadingAnalysis, setIsLoadingAnalysis] = useState(false);
 
   const [activeTab, setActiveTab] = useState('overview'); // 'overview' | 'coverage' | 'exclusions' | 'limits' | 'clauses'
-  const [currentPage, setCurrentPage] = useState(1);
-  const [highlightedClauseId, setHighlightedClauseId] = useState(null);
+  
+  const pageParam = parseInt(searchParams.get('page') || '', 10);
+  const clauseParam = searchParams.get('clause') || null;
+
+  const [currentPage, setCurrentPage] = useState(!isNaN(pageParam) ? pageParam : 1);
+  const [highlightedClauseId, setHighlightedClauseId] = useState(clauseParam);
+
+  // Sync if query params change
+  useEffect(() => {
+    if (!isNaN(pageParam) && pageParam > 0) {
+      setCurrentPage(pageParam);
+    }
+    if (clauseParam) {
+      setHighlightedClauseId(clauseParam);
+      // Switch tab to clauses if requested from source jump
+      setActiveTab('clauses');
+    }
+  }, [pageParam, clauseParam]);
 
   // Fetch complete structured analysis from backend API when viewing policy
   useEffect(() => {
