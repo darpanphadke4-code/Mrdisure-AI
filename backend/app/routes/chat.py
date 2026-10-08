@@ -67,6 +67,12 @@ def chat_with_policy(
             detail=f"Policy '{payload.policy_id}' not found or access denied."
         )
 
+    if policy.processing_status == "PROCESSING":
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Policy document is currently being analyzed and indexed. Please wait a moment for processing to complete."
+        )
+
     # 2. Get or create chat session
     session = None
     if payload.session_id:
@@ -240,4 +246,42 @@ def list_chat_sessions(
         success=True,
         data=result,
         message=f"Retrieved {len(result)} chat sessions"
+    )
+
+@router.delete("/chat/sessions/{session_id}", response_model=StandardResponse)
+def delete_chat_session(
+    session_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Delete a chat session and all its messages.
+    Enforces user authorization. Does NOT delete the associated policy.
+    """
+    session = db.query(ChatSession).filter(ChatSession.id == session_id).first()
+    if not session:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Chat session '{session_id}' not found."
+        )
+
+    if session.user_id != current_user.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You are not authorized to delete this chat session."
+        )
+
+    # Delete all associated messages first to avoid orphan records across any DB engine
+    db.query(ChatMessage).filter(ChatMessage.session_id == session_id).delete(synchronize_session=False)
+
+    # Delete session
+    db.delete(session)
+    db.commit()
+
+    logger.info(f"User {current_user.id} deleted chat session {session_id}")
+
+    return StandardResponse(
+        success=True,
+        data={"session_id": session_id},
+        message="Chat session and its messages deleted successfully"
     )

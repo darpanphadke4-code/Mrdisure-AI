@@ -26,31 +26,42 @@ export const ReportsPage = () => {
 
   // Filter & Sort Logic
   const filteredReports = useMemo(() => {
-    return reports
+    return (reports || [])
       .filter((r) => {
+        const title = r.reportName || r.title || '';
+        const patient = r.patientName || '';
+        const diag = r.diagnosis || '';
+        const pol = r.policyName || '';
+        const statusVal = r.status || 'Completed';
+
         const matchesSearch =
-          r.reportName.toLowerCase().includes(searchQuery.toLowerCase()) ||
-          r.patientName.toLowerCase().includes(searchQuery.toLowerCase()) ||
-          r.diagnosis.toLowerCase().includes(searchQuery.toLowerCase()) ||
-          r.policyName.toLowerCase().includes(searchQuery.toLowerCase());
+          title.toLowerCase().includes(searchQuery.toLowerCase()) ||
+          patient.toLowerCase().includes(searchQuery.toLowerCase()) ||
+          diag.toLowerCase().includes(searchQuery.toLowerCase()) ||
+          pol.toLowerCase().includes(searchQuery.toLowerCase());
 
         const matchesStatus =
-          selectedStatus === 'All' || r.status.toLowerCase() === selectedStatus.toLowerCase();
+          selectedStatus === 'All' || statusVal.toLowerCase() === selectedStatus.toLowerCase();
 
         return matchesSearch && matchesStatus;
       })
       .sort((a, b) => {
+        const dateA = new Date(a.dateCreated || a.createdAt || 0);
+        const dateB = new Date(b.dateCreated || b.createdAt || 0);
+        const amtA = Number(a.totalBilled || 0);
+        const amtB = Number(b.totalBilled || 0);
+
         if (sortBy === 'date-desc') {
-          return new Date(b.dateCreated) - new Date(a.dateCreated);
+          return dateB - dateA;
         }
         if (sortBy === 'date-asc') {
-          return new Date(a.dateCreated) - new Date(b.dateCreated);
+          return dateA - dateB;
         }
         if (sortBy === 'amount-desc') {
-          return b.totalBilled - a.totalBilled;
+          return amtB - amtA;
         }
         if (sortBy === 'amount-asc') {
-          return a.totalBilled - b.totalBilled;
+          return amtA - amtB;
         }
         return 0;
       });

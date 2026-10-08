@@ -9,6 +9,7 @@ import { ChatSuggestions } from '../components/chat/ChatSuggestions';
 import { ChatInput } from '../components/chat/ChatInput';
 import { PolicyContextPanel } from '../components/chat/PolicyContextPanel';
 import { Button } from '../components/common/Button';
+import { ConfirmDialog } from '../components/common/ConfirmDialog';
 import {
   Bot,
   Sparkles,
@@ -40,6 +41,8 @@ export const AssistantPage = () => {
     const list = chatService.getSessions();
     return list[0]?.id || 'session-1';
   });
+  const [sessionToDelete, setSessionToDelete] = useState(null);
+  const [isDeletingSession, setIsDeletingSession] = useState(false);
   const [isTyping, setIsTyping] = useState(false);
   const [showRightContext, setShowRightContext] = useState(true);
   const [showMobileHistory, setShowMobileHistory] = useState(false);
@@ -63,6 +66,32 @@ export const AssistantPage = () => {
       setAiHealth(health);
     });
   }, []);
+
+  // Sync sessions with backend on mount or policy change
+  useEffect(() => {
+    let isMounted = true;
+    chatService.fetchSessions(activePolicy?.id).then((synced) => {
+      if (isMounted && Array.isArray(synced) && synced.length > 0) {
+        setSessions(synced);
+        if (!synced.some((s) => s.id === activeSessionId)) {
+          setActiveSessionId(synced[0].id);
+        }
+      }
+    });
+    return () => { isMounted = false; };
+  }, [activePolicy?.id]);
+
+  // Select session and lazy-load messages if needed
+  const handleSelectSession = async (id) => {
+    setActiveSessionId(id);
+    const sess = sessions.find((s) => s.id === id);
+    if (sess && (!sess.messages || sess.messages.length === 0)) {
+      const updated = await chatService.loadSessionMessages(id);
+      if (updated) {
+        setSessions(chatService.getSessions());
+      }
+    }
+  };
 
   // Handle sending a message
   const handleSendMessage = async (text) => {
@@ -102,11 +131,36 @@ export const AssistantPage = () => {
     toast.success('Started new inquiry session');
   };
 
-  // Clear current session messages
-  const handleClearSession = (sessionId) => {
-    chatService.clearSession(sessionId);
-    setSessions(chatService.getSessions());
-    toast.success('Conversation cleared');
+  // Delete session with modal confirmation and backend removal
+  const handleDeleteSessionClick = (sessionId) => {
+    setSessionToDelete(sessionId);
+  };
+
+  const handleConfirmDeleteSession = async () => {
+    if (!sessionToDelete) return;
+    setIsDeletingSession(true);
+    try {
+      await chatService.deleteSession(sessionToDelete);
+      const updatedList = chatService.getSessions();
+      setSessions(updatedList);
+      toast.success('Conversation deleted successfully');
+
+      if (activeSessionId === sessionToDelete) {
+        if (updatedList.length > 0) {
+          setActiveSessionId(updatedList[0].id);
+        } else {
+          const newSess = chatService.createSession('New Inquiry Session', activePolicy?.id);
+          setSessions([newSess]);
+          setActiveSessionId(newSess.id);
+        }
+      }
+    } catch (e) {
+      console.error('Failed to delete session:', e);
+      toast.error(e.message || 'Failed to delete conversation');
+    } finally {
+      setIsDeletingSession(false);
+      setSessionToDelete(null);
+    }
   };
 
   // Transfer estimate payload to Cost Estimator
@@ -142,9 +196,10 @@ export const AssistantPage = () => {
         <ChatHistorySidebar
           sessions={sessions}
           activeSessionId={activeSessionId}
-          onSelectSession={(id) => setActiveSessionId(id)}
+          onSelectSession={handleSelectSession}
           onNewSession={handleNewSession}
-          onClearSession={handleClearSession}
+          onDeleteSession={handleDeleteSessionClick}
+          isDeletingSessionId={isDeletingSession ? sessionToDelete : null}
         />
       </div>
 
@@ -161,17 +216,18 @@ export const AssistantPage = () => {
             sessions={sessions}
             activeSessionId={activeSessionId}
             onSelectSession={(id) => {
-              setActiveSessionId(id);
+              handleSelectSession(id);
               setShowMobileHistory(false);
             }}
             onNewSession={() => {
               handleNewSession();
               setShowMobileHistory(false);
             }}
-            onClearSession={(id) => {
-              handleClearSession(id);
+            onDeleteSession={(id) => {
+              handleDeleteSessionClick(id);
               setShowMobileHistory(false);
             }}
+            isDeletingSessionId={isDeletingSession ? sessionToDelete : null}
           />
         </div>
       )}
@@ -325,6 +381,19 @@ export const AssistantPage = () => {
           />
         </div>
       )}
+
+      {/* Confirmation Dialog for Permanent Session Deletion */}
+      <ConfirmDialog
+        isOpen={!!sessionToDelete}
+        onClose={() => !isDeletingSession && setSessionToDelete(null)}
+        onConfirm={handleConfirmDeleteSession}
+        title="Delete Conversation"
+        message="Are you sure you want to delete this conversation? All messages and citations in this consultation will be permanently removed from the database. The underlying insurance policy and documents will not be affected."
+        confirmText="Delete Conversation"
+        cancelText="Cancel"
+        isDanger={true}
+        isLoading={isDeletingSession}
+      />
     </div>
   );
 };

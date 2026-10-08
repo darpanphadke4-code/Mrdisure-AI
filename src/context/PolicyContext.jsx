@@ -59,13 +59,24 @@ export const PolicyProvider = ({ children }) => {
       const stored = localStorage.getItem('medisure_policies');
       if (stored) {
         const list = JSON.parse(stored);
-        if (list && list.length > 0) return list[0].id;
+        if (list && list.length > 0) {
+          const backend = list.find((p) => p.isBackend);
+          return backend ? backend.id : list[0].id;
+        }
       }
     } catch (e) {}
     return "pol-care-supreme-01";
   });
 
-  const [reports, setReports] = useState(() => reportService.getReports());
+  const [reports, setReports] = useState(() => {
+    try {
+      const stored = localStorage.getItem('medisure_reports');
+      if (stored) return JSON.parse(stored);
+    } catch (e) {
+      console.warn('Failed reading localStorage reports', e);
+    }
+    return [];
+  });
   const [user, setUser] = useState(() => authService.getUser());
   const [activities, setActivities] = useState(() => {
     try {
@@ -76,16 +87,37 @@ export const PolicyProvider = ({ children }) => {
     }
   });
 
-  // Re-fetch policies from backend API on mount
+  // Re-fetch policies and persistent reports from backend API on mount
   useEffect(() => {
     let isMounted = true;
     policyService.getPolicies().then((fetched) => {
       if (isMounted && Array.isArray(fetched) && fetched.length > 0) {
         setPolicies(fetched);
+        const backendPolicy = fetched.find((p) => p.isBackend);
+        setSelectedPolicyId((prev) => {
+          const isPrevValidBackend = fetched.some((p) => p.id === prev && p.isBackend);
+          if (!isPrevValidBackend && backendPolicy) {
+            return backendPolicy.id;
+          }
+          const isPrevInList = fetched.some((p) => p.id === prev);
+          if (!isPrevInList) {
+            return fetched[0].id;
+          }
+          return prev;
+        });
       }
     }).catch((e) => {
       console.warn('Error fetching policies on mount:', e);
     });
+
+    reportService.getReports().then((fetchedReports) => {
+      if (isMounted && Array.isArray(fetchedReports)) {
+        setReports(fetchedReports);
+      }
+    }).catch((e) => {
+      console.warn('Error fetching reports on mount:', e);
+    });
+
     return () => { isMounted = false; };
   }, []);
 
@@ -130,24 +162,35 @@ export const PolicyProvider = ({ children }) => {
     toast.success(`Policy "${polToDelete?.name || ''}" removed`);
   };
 
-  const handleSaveReport = (report) => {
-    const saved = reportService.saveReport(report);
-    const updated = reportService.getReports();
-    setReports(updated);
-    addActivity({
-      type: "report",
-      title: "Cost Analysis Saved",
-      description: `${report.reportName} for ₹${report.totalBilled.toLocaleString('en-IN')}`,
-      policyName: report.policyName,
-    });
-    toast.success("Analysis report saved successfully!");
-    return saved;
+  const handleSaveReport = async (report) => {
+    try {
+      const saved = await reportService.saveReport(report);
+      const updated = await reportService.getReports();
+      setReports(updated);
+      addActivity({
+        type: "report",
+        title: "Cost Analysis Saved",
+        description: `${saved.reportName || report.reportName} for ₹${Number(saved.totalBilled || report.totalBilled || 0).toLocaleString('en-IN')}`,
+        policyName: saved.policyName || report.policyName,
+      });
+      toast.success("Analysis report saved successfully!");
+      return saved;
+    } catch (err) {
+      console.error("Failed to save report:", err);
+      toast.error(err.message || "Failed to save analysis report");
+      throw err;
+    }
   };
 
-  const handleDeleteReport = (id) => {
-    const updated = reportService.deleteReport(id);
-    setReports(updated);
-    toast.success("Report deleted");
+  const handleDeleteReport = async (id) => {
+    try {
+      const updated = await reportService.deleteReport(id);
+      setReports(updated);
+      toast.success("Report deleted");
+    } catch (err) {
+      console.error("Failed to delete report:", err);
+      toast.error(err.message || "Failed to delete report");
+    }
   };
 
   const handleUpdateUser = (updates) => {

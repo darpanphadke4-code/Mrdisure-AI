@@ -1,5 +1,6 @@
 # backend/app/services/llm_service.py
 import re
+import json
 import logging
 from typing import Optional, List, Dict
 import httpx
@@ -36,35 +37,69 @@ class LLMService:
         timeout: float = 120.0
     ) -> str:
         """
-        Generate completion using local Qwen3 model.
+        Generate completion using local Qwen3 model with progressive streaming.
         """
-        messages: List[Dict[str, str]] = []
-        if system_prompt:
-            messages.append({"role": "system", "content": system_prompt.strip()})
-        messages.append({"role": "user", "content": prompt.strip()})
+        system_text = system_prompt.strip() if system_prompt else (
+            "You are MediSure AI, a professional medical insurance policy assistant. "
+            "Keep internal thinking under 2 sentences. "
+            "Immediately output the grounded answer with exact page citations [Page X]."
+        )
+        messages: List[Dict[str, str]] = [
+            {"role": "system", "content": system_text},
+            {"role": "user", "content": prompt.strip()}
+        ]
 
         try:
             with httpx.Client(timeout=timeout) as client:
                 payload = {
                     "model": self.model_name,
                     "messages": messages,
-                    "stream": False,
+                    "stream": True,
                     "options": {
                         "temperature": 0.1,  # Low temperature for factual grounded answers
                         "top_p": 0.9,
+                        "num_predict": 800,
                     }
                 }
-                res = client.post(f"{self.base_url}/api/chat", json=payload)
-                if res.status_code != 200:
-                    raise OllamaServiceError(
-                        f"Ollama chat error (HTTP {res.status_code}): {res.text}"
-                    )
                 
-                data = res.json()
-                raw_content = data.get("message", {}).get("content", "")
-                
+                content_parts = []
+                think_parts = []
+                with client.stream("POST", f"{self.base_url}/api/chat", json=payload) as response:
+                    if response.status_code != 200:
+                        raise OllamaServiceError(
+                            f"Ollama chat error (HTTP {response.status_code})"
+                        )
+                    for line in response.iter_lines():
+                        if not line:
+                            continue
+                        data = json.loads(line)
+                        msg_obj = data.get("message", {})
+                        if msg_obj.get("thinking"):
+                            think_parts.append(msg_obj.get("thinking"))
+                        if msg_obj.get("content"):
+                            content_parts.append(msg_obj.get("content"))
+                        if data.get("done"):
+                            break
+
+                raw_content = "".join(content_parts).strip()
+                thinking = "".join(think_parts).strip()
+
+                # If content is empty but thinking exists (Ollama 0.40+ reasoning channel),
+                # extract the grounded concluding answer
+                if not raw_content and thinking:
+                    think_clean = re.sub(r'<think>.*?</think>', '', thinking, flags=re.DOTALL).strip()
+                    lines = [l.strip() for l in think_clean.split("\n") if l.strip()]
+                    for line in reversed(lines):
+                        if any(k in line.lower() for k in ["[page", "limit", "covered", "waiting period", "sum insured", "excluded", "cover", "hospital"]):
+                            raw_content = line
+                            break
+                    if not raw_content:
+                        raw_content = lines[-1] if lines else thinking.strip()
+
                 # Clean any thinking tags (<think>...</think>) if present in model output
                 cleaned = re.sub(r'<think>.*?</think>', '', raw_content, flags=re.DOTALL).strip()
+                cleaned = re.sub(r'</think>', '', cleaned).strip()
+                cleaned = re.sub(r'<think>.*', '', cleaned, flags=re.DOTALL).strip()
                 return cleaned if cleaned else raw_content.strip()
 
         except httpx.ConnectError as err:

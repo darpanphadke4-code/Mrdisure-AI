@@ -585,7 +585,33 @@ export const CostEstimatorPage = () => {
           estimate={estimateResult}
           patientInfo={patientInfo}
           policy={activePolicy}
-          onSaveReport={() => calculatorService.saveAsReport(estimateResult, patientInfo, activePolicy)}
+          onSaveReport={async () => {
+            const newReport = {
+              reportName: `${patientInfo.diagnosis || 'Hospital Claim'} - Estimate Analysis`,
+              policyId: activePolicy?.id,
+              policyName: activePolicy?.name,
+              provider: activePolicy?.provider,
+              patientName: patientInfo.patientName || "Insured Patient",
+              patientAge: Number(patientInfo.age) || 35,
+              diagnosis: patientInfo.diagnosis || "Medical Inpatient Treatment",
+              hospitalName: patientInfo.hospitalName || "Partner Network Hospital",
+              treatmentType: patientInfo.treatmentType || "Inpatient Care",
+              admissionDate: patientInfo.admissionDate || new Date().toISOString().split('T')[0],
+              dischargeDate: patientInfo.dischargeDate || new Date(Date.now() + 3 * 86400000).toISOString().split('T')[0],
+              dateCreated: new Date().toISOString().split('T')[0],
+              totalBilled: estimateResult.totalBilled,
+              estimatedInsurerShare: estimateResult.estimatedInsurerShare,
+              estimatedPatientShare: estimateResult.estimatedPatientShare,
+              deductibleApplied: estimateResult.deductibleApplied,
+              copayApplied: estimateResult.copayApplied,
+              nonPayableDeductions: estimateResult.nonPayableDeductions,
+              roomRentDeductions: estimateResult.roomRentDeductions,
+              status: "Completed",
+              itemizedCount: estimateResult.itemizedDetails?.length || 0,
+              notes: `Automated estimate generated using MediSure AI. Policy deductible: ₹${Number(estimateResult.deductibleApplied || 0).toLocaleString('en-IN')}, Room rent limit: ₹${activePolicy?.roomRentLimitPerDay || 0}/day.`,
+            };
+            return await saveReport(newReport);
+          }}
           onEditScenario={() => setCurrentStep(3)}
           onDownloadReport={() => {
             const tempReport = {

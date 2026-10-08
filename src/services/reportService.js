@@ -6,9 +6,22 @@ const REPORTS_KEY = 'medisure_reports';
 
 export const reportService = {
   /**
-   * Get all reports
+   * Get all reports from backend database with fallback to localStorage
    */
-  getReports: () => {
+  getReports: async () => {
+    try {
+      const res = await fetch('/api/reports');
+      if (res.ok) {
+        const json = await res.json();
+        if (json.success && Array.isArray(json.data)) {
+          localStorage.setItem(REPORTS_KEY, JSON.stringify(json.data));
+          return json.data;
+        }
+      }
+    } catch (e) {
+      console.warn('Failed to fetch reports from backend API, using cached data:', e);
+    }
+
     try {
       const stored = localStorage.getItem(REPORTS_KEY);
       if (stored) {
@@ -17,36 +30,87 @@ export const reportService = {
     } catch (e) {
       console.warn('Failed to fetch reports from localStorage', e);
     }
-    localStorage.setItem(REPORTS_KEY, JSON.stringify(initialReports));
     return initialReports;
   },
 
   /**
-   * Get single report
+   * Get single report by ID from backend
    */
-  getReportById: (id) => {
-    const list = reportService.getReports();
+  getReportById: async (id) => {
+    try {
+      const res = await fetch(`/api/reports/${id}`);
+      if (res.ok) {
+        const json = await res.json();
+        if (json.success && json.data) {
+          return json.data;
+        }
+      }
+    } catch (e) {
+      console.warn(`Failed to fetch report ${id} from API:`, e);
+    }
+
+    const list = await reportService.getReports();
     return list.find((r) => r.id === id) || list[0] || null;
   },
 
   /**
-   * Save a new report
+   * Save a new report to backend database
    */
-  saveReport: (report) => {
-    const reports = reportService.getReports();
-    const updated = [report, ...reports];
-    localStorage.setItem(REPORTS_KEY, JSON.stringify(updated));
-    return report;
+  saveReport: async (report) => {
+    try {
+      const res = await fetch('/api/reports', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(report),
+      });
+
+      if (res.ok) {
+        const json = await res.json();
+        if (json.success && json.data) {
+          const savedReport = json.data;
+          const current = (await reportService.getReports()).filter(r => r.id !== savedReport.id);
+          const updated = [savedReport, ...current];
+          localStorage.setItem(REPORTS_KEY, JSON.stringify(updated));
+          return savedReport;
+        }
+      } else {
+        const errJson = await res.json().catch(() => ({}));
+        throw new Error(errJson.detail || `Server failed to save report (HTTP ${res.status})`);
+      }
+    } catch (apiErr) {
+      console.warn('Backend report persistence failed:', apiErr);
+      throw apiErr;
+    }
   },
 
   /**
-   * Delete report
+   * Delete report from backend database
    */
-  deleteReport: (id) => {
-    const reports = reportService.getReports();
-    const updated = reports.filter((r) => r.id !== id);
-    localStorage.setItem(REPORTS_KEY, JSON.stringify(updated));
-    return updated;
+  deleteReport: async (id) => {
+    try {
+      const res = await fetch(`/api/reports/${id}`, {
+        method: 'DELETE',
+      });
+
+      if (!res.ok && res.status !== 404) {
+        const errJson = await res.json().catch(() => ({}));
+        throw new Error(errJson.detail || `Failed to delete report (HTTP ${res.status})`);
+      }
+    } catch (apiErr) {
+      if (!apiErr.message || !apiErr.message.includes('404')) {
+        throw apiErr;
+      }
+    }
+
+    try {
+      const stored = localStorage.getItem(REPORTS_KEY);
+      const reports = stored ? JSON.parse(stored) : [];
+      const updated = reports.filter((r) => r.id !== id);
+      localStorage.setItem(REPORTS_KEY, JSON.stringify(updated));
+      return updated;
+    } catch {
+      return [];
+    }
   },
 
   /**

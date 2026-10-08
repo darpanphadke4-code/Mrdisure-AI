@@ -141,13 +141,20 @@ export const chatService = {
         } else {
           const errData = await res.json().catch(() => ({}));
           const errMsg = errData.detail || `Chat request failed (HTTP ${res.status})`;
+          if (res.status === 409 || errMsg.includes("analyzed and indexed")) {
+            throw new Error(errMsg);
+          }
           if (res.status === 503 || errMsg.includes("Ollama") || errMsg.includes("Local AI service")) {
             throw new Error("Local AI service is not running. Start Ollama and try again.");
           }
           throw new Error(errMsg);
         }
       } catch (apiErr) {
-        if (apiErr.message && (apiErr.message.includes("Ollama") || apiErr.message.includes("Local AI service"))) {
+        if (apiErr.message && (
+          apiErr.message.includes("Ollama") || 
+          apiErr.message.includes("Local AI service") ||
+          apiErr.message.includes("analyzed and indexed")
+        )) {
           throw apiErr;
         }
         console.warn('Real RAG API failed or policy is purely local demo, using simulated fallback:', apiErr);
@@ -203,6 +210,123 @@ export const chatService = {
       assistantMsg,
       updatedSession: sessions[sessionIndex]
     };
+  },
+
+  /**
+   * Delete a chat session on backend and locally
+   */
+  deleteSession: async (sessionId) => {
+    const sessions = chatService.getSessions();
+    const session = sessions.find((s) => s.id === sessionId);
+    const backendId = session?.backendSessionId || sessionId;
+
+    // Call backend DELETE endpoint if session exists on backend
+    try {
+      const res = await fetch(`/api/chat/sessions/${backendId}`, {
+        method: 'DELETE',
+      });
+
+      if (!res.ok && res.status !== 404) {
+        const errData = await res.json().catch(() => ({}));
+        throw new Error(errData.detail || `Failed to delete session (HTTP ${res.status})`);
+      }
+    } catch (e) {
+      if (!e.message || !e.message.includes('404')) {
+        throw e;
+      }
+    }
+
+    // Only remove from local storage after backend deletion succeeds
+    const updated = sessions.filter((s) => s.id !== sessionId && s.backendSessionId !== sessionId);
+    localStorage.setItem(SESSIONS_KEY, JSON.stringify(updated));
+    return updated;
+  },
+
+  /**
+   * Fetch backend chat sessions and sync with local sessions
+   */
+  fetchSessions: async (policyId) => {
+    try {
+      const url = policyId ? `/api/chat/sessions?policy_id=${encodeURIComponent(policyId)}` : '/api/chat/sessions';
+      const res = await fetch(url);
+      if (res.ok) {
+        const json = await res.json();
+        if (json.success && Array.isArray(json.data)) {
+          const backendList = json.data;
+          const localSessions = chatService.getSessions();
+          
+          const synced = [];
+          
+          for (const bSess of backendList) {
+            const localMatch = localSessions.find(s => s.id === bSess.id || s.backendSessionId === bSess.id);
+            if (localMatch) {
+              synced.push({
+                ...localMatch,
+                id: bSess.id,
+                backendSessionId: bSess.id,
+                title: bSess.title || localMatch.title,
+                policyId: bSess.policy_id || localMatch.policyId,
+                createdAt: bSess.created_at || localMatch.createdAt,
+              });
+            } else {
+              synced.push({
+                id: bSess.id,
+                backendSessionId: bSess.id,
+                title: bSess.title,
+                policyId: bSess.policy_id,
+                createdAt: bSess.created_at,
+                messages: []
+              });
+            }
+          }
+
+          for (const loc of localSessions) {
+            if (!loc.backendSessionId && !backendList.some(b => b.id === loc.id)) {
+              synced.push(loc);
+            }
+          }
+
+          localStorage.setItem(SESSIONS_KEY, JSON.stringify(synced));
+          return synced;
+        }
+      }
+    } catch (e) {
+      console.warn('Failed to fetch backend sessions:', e);
+    }
+    return chatService.getSessions();
+  },
+
+  /**
+   * Load messages for a session from backend
+   */
+  loadSessionMessages: async (sessionId) => {
+    const sessions = chatService.getSessions();
+    const sessionIndex = sessions.findIndex(s => s.id === sessionId);
+    if (sessionIndex === -1) return null;
+
+    const backendId = sessions[sessionIndex].backendSessionId || sessionId;
+    try {
+      const res = await fetch(`/api/chat/sessions/${backendId}`);
+      if (res.ok) {
+        const json = await res.json();
+        if (json.success && json.data && Array.isArray(json.data.messages)) {
+          const msgs = json.data.messages.map(m => ({
+            id: m.id,
+            sender: m.role,
+            text: m.content,
+            citations: m.citations || [],
+            timestamp: new Date(m.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+            confidence: m.citations?.length > 0 ? "Verified Grounded" : undefined
+          }));
+          sessions[sessionIndex].messages = msgs;
+          localStorage.setItem(SESSIONS_KEY, JSON.stringify(sessions));
+          return sessions[sessionIndex];
+        }
+      }
+    } catch (e) {
+      console.warn('Failed to load session messages from backend:', e);
+    }
+    return sessions[sessionIndex];
   },
 
   /**

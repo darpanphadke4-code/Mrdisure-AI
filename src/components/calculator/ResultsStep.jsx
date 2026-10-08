@@ -27,11 +27,20 @@ export const ResultsStep = ({
   onDownloadReport,
 }) => {
   const [showAppliedRules, setShowAppliedRules] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
   const [isSaved, setIsSaved] = useState(false);
 
-  const handleSave = () => {
-    onSaveReport();
-    setIsSaved(true);
+  const handleSave = async () => {
+    if (isSaving || isSaved) return;
+    setIsSaving(true);
+    try {
+      await onSaveReport();
+      setIsSaved(true);
+    } catch (e) {
+      console.error('Error saving report:', e);
+    } finally {
+      setIsSaving(false);
+    }
   };
 
   return (
@@ -69,7 +78,8 @@ export const ResultsStep = ({
               variant="secondary"
               size="sm"
               leftIcon={Save}
-              disabled={isSaved}
+              disabled={isSaved || isSaving}
+              isLoading={isSaving}
               onClick={handleSave}
             >
               {isSaved ? 'Saved to Reports' : 'Save Analysis'}

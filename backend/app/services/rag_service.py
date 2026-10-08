@@ -90,26 +90,32 @@ class RAGService:
         raw_answer = llm_service.generate(prompt=prompt)
         answer = raw_answer.strip() if raw_answer else DEFAULT_FALLBACK_ANSWER
 
+        is_fallback = (
+            answer == DEFAULT_FALLBACK_ANSWER or
+            "does not establish the answer" in answer.lower()
+        )
+
         # 6. Assemble citations
         citations: List[Dict[str, Any]] = []
-        seen = set()
-        for c in chunks:
-            citation_key = (c.get("page_number"), c.get("section_title"))
-            if citation_key not in seen:
-                seen.add(citation_key)
-                citations.append({
-                    "page": c.get("page_number"),
-                    "section": c.get("section_title"),
-                    "clause_id": c.get("clause_id"),
-                    "chunk_id": c.get("chunk_id"),
-                    "similarity": round(c.get("similarity", 0.0), 3)
-                })
+        if not is_fallback:
+            seen = set()
+            for c in chunks:
+                citation_key = (c.get("page_number"), c.get("section_title"))
+                if citation_key not in seen:
+                    seen.add(citation_key)
+                    citations.append({
+                        "page": c.get("page_number"),
+                        "section": c.get("section_title"),
+                        "clause_id": c.get("clause_id"),
+                        "chunk_id": c.get("chunk_id"),
+                        "similarity": round(c.get("similarity", 0.0), 3)
+                    })
 
         return {
             "answer": answer,
             "citations": citations,
-            "retrieval_count": len(chunks),
-            "context_found": True
+            "retrieval_count": len(chunks) if not is_fallback else 0,
+            "context_found": not is_fallback
         }
 
 rag_service = RAGService()

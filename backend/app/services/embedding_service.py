@@ -42,7 +42,8 @@ class EmbeddingService:
             with httpx.Client(timeout=30.0) as client:
                 payload = {
                     "model": self.model_name,
-                    "prompt": text.strip()
+                    "prompt": text.strip(),
+                    "keep_alive": 0
                 }
                 res = client.post(f"{self.base_url}/api/embeddings", json=payload)
                 if res.status_code != 200:

@@ -264,65 +264,77 @@ def test_chat_session_creation_and_history(mock_rag):
     )
     db.add(pol)
     db.commit()
-    db.close()
 
-    mock_rag.return_value = {
-        "answer": "Your policy covers room rent up to ₹5,000 per day.",
-        "citations": [{"page": 2, "section": "Room Rent", "clause_id": "c1", "chunk_id": "ch1"}],
-        "retrieval_count": 1,
-        "context_found": True
-    }
-
-    # 11. Send chat message without session_id (should auto-create session)
-    chat_resp = client.post(
-        "/api/chat",
-        json={
-            "policy_id": pol_id,
-            "question": "What is the room rent limit?"
+    try:
+        mock_rag.return_value = {
+            "answer": "Your policy covers room rent up to ₹5,000 per day.",
+            "citations": [{"page": 2, "section": "Room Rent", "clause_id": "c1", "chunk_id": "ch1"}],
+            "retrieval_count": 1,
+            "context_found": True
         }
-    )
-    assert chat_resp.status_code == 200
-    data = chat_resp.json()["data"]
-    session_id = data["session_id"]
-    assert session_id is not None
-    assert "₹5,000" in data["answer"]
-    assert len(data["citations"]) == 1
 
-    # 12. Retrieve chat history
-    hist_resp = client.get(f"/api/chat/sessions/{session_id}")
-    assert hist_resp.status_code == 200
-    hist_data = hist_resp.json()["data"]
-    assert hist_data["id"] == session_id
-    assert len(hist_data["messages"]) == 2  # user + assistant
-    assert hist_data["messages"][0]["role"] == "user"
-    assert hist_data["messages"][1]["role"] == "assistant"
-    assert len(hist_data["messages"][1]["citations"]) == 1
+        # 11. Send chat message without session_id (should auto-create session)
+        chat_resp = client.post(
+            "/api/chat",
+            json={
+                "policy_id": pol_id,
+                "question": "What is the room rent limit?"
+            }
+        )
+        assert chat_resp.status_code == 200
+        data = chat_resp.json()["data"]
+        session_id = data["session_id"]
+        assert session_id is not None
+        assert "₹5,000" in data["answer"]
+        assert len(data["citations"]) == 1
+
+        # 12. Retrieve chat history
+        hist_resp = client.get(f"/api/chat/sessions/{session_id}")
+        assert hist_resp.status_code == 200
+        hist_data = hist_resp.json()["data"]
+        assert hist_data["id"] == session_id
+        assert len(hist_data["messages"]) == 2  # user + assistant
+        assert hist_data["messages"][0]["role"] == "user"
+        assert hist_data["messages"][1]["role"] == "assistant"
+        assert len(hist_data["messages"][1]["citations"]) == 1
+    finally:
+        db.query(ChatMessage).filter(ChatMessage.session_id.in_(
+            db.query(ChatSession.id).filter(ChatSession.policy_id == pol_id)
+        )).delete(synchronize_session=False)
+        db.query(ChatSession).filter(ChatSession.policy_id == pol_id).delete()
+        db.query(Policy).filter(Policy.id == pol_id).delete()
+        db.commit()
+        db.close()
 
 # 13. Unauthorized policy access
 def test_unauthorized_policy_access():
     import uuid
     other_pol_id = f"pol-other-{uuid.uuid4()}"
     db = SessionLocal()
-    # Policy belonging to other user
-    other_pol = Policy(
-        id=other_pol_id,
-        user_id="user-someone-else",
-        original_filename="Other.pdf",
-        stored_filename="other.pdf",
-        file_path="other.pdf",
-        file_size=1024,
-        processing_status="COMPLETED"
-    )
-    db.add(other_pol)
-    db.commit()
-    db.close()
+    try:
+        # Policy belonging to other user
+        other_pol = Policy(
+            id=other_pol_id,
+            user_id="user-someone-else",
+            original_filename="Other.pdf",
+            stored_filename="other.pdf",
+            file_path="other.pdf",
+            file_size=1024,
+            processing_status="COMPLETED"
+        )
+        db.add(other_pol)
+        db.commit()
 
-    # Current user tries to chat against other user's policy
-    resp = client.post(
-        "/api/chat",
-        json={"policy_id": other_pol_id, "question": "What is covered?"}
-    )
-    assert resp.status_code == 404
+        # Current user tries to chat against other user's policy
+        resp = client.post(
+            "/api/chat",
+            json={"policy_id": other_pol_id, "question": "What is covered?"}
+        )
+        assert resp.status_code == 404
+    finally:
+        db.query(Policy).filter(Policy.id == other_pol_id).delete()
+        db.commit()
+        db.close()
 
 # 14. Unauthorized session access
 def test_unauthorized_session_access():
@@ -330,15 +342,19 @@ def test_unauthorized_session_access():
     sess_id = f"sess-other-{uuid.uuid4()}"
     temp_pol_id = f"pol-temp-{uuid.uuid4()}"
     db = SessionLocal()
-    other_sess = ChatSession(
-        id=sess_id,
-        user_id="user-someone-else",
-        policy_id=temp_pol_id,
-        title="Secret Session"
-    )
-    db.add(other_sess)
-    db.commit()
-    db.close()
+    try:
+        other_sess = ChatSession(
+            id=sess_id,
+            user_id="user-someone-else",
+            policy_id=temp_pol_id,
+            title="Secret Session"
+        )
+        db.add(other_sess)
+        db.commit()
 
-    resp = client.get(f"/api/chat/sessions/{sess_id}")
-    assert resp.status_code == 404
+        resp = client.get(f"/api/chat/sessions/{sess_id}")
+        assert resp.status_code == 404
+    finally:
+        db.query(ChatSession).filter(ChatSession.id == sess_id).delete()
+        db.commit()
+        db.close()
